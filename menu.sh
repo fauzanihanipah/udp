@@ -1,10 +1,10 @@
 #!/bin/bash
 # ==========================================
-# Script: UDP ZIVPN OGH-POTATO (FIX KONEK)
-# Fitur: Auto-Configure UDP Custom Engine
+# Script: ZIVPN MANAGER (AMD64 VERSION)
+# Target: KHUSUS APLIKASI ZIVPN (BUKAN HTTP CUSTOM)
 # ==========================================
 
-# --- Kode Warna ANSI ---
+# --- Kode Warna ---
 NC='\033[0m'
 BOLD='\033[1m'
 PURPLE='\033[0;35m'
@@ -16,11 +16,20 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 
 # --- Variabel System ---
-SERVICE_NAME="udp-custom"
-BINARY_URL="https://github.com/fauzanihanipah/udp/raw/main/udp-custom"
+BINARY_NAME="udp-zivpn-linux-amd64"
+BINARY_URL="https://github.com/fauzanihanipah/udp/raw/main/${BINARY_NAME}"
+BINARY_PATH="/usr/bin/${BINARY_NAME}"
 BANNER_PATH="/etc/zivpn-banner.txt"
-CONFIG_PATH="/etc/udp/config.json"
 IP_VPS=$(curl -s ifconfig.me)
+
+# Mencari Domain VPS
+if [ -f "/etc/xray/domain" ]; then
+    DOMAIN=$(cat /etc/xray/domain)
+elif [ -f "/etc/v2ray/domain" ]; then
+    DOMAIN=$(cat /etc/v2ray/domain)
+else
+    DOMAIN="No-Domain"
+fi
 
 function show_header() {
     clear
@@ -32,59 +41,64 @@ function show_header() {
     echo -e " | ${PURPLE}    | |__| |   ${MAGENTA} | |_| |  ${RED}  |  _  | ${BLUE}          |${NC}"
     echo -e " | ${PURPLE}     \____/    ${MAGENTA}  \____|  ${RED}  |_| |_| ${BLUE}          |${NC}"
     echo -e "${BLUE} |                                                  |${NC}"
-    echo -e "${BLUE} |${NC}        ${BOLD}${CYAN}POTATO x OGH - ULTIMATE MANAGER${NC}${BLUE}         |${NC}"
+    echo -e "${BLUE} |${NC}        ${BOLD}${CYAN}POTATO x OGH - ZIVPN AMD64 MGMT${NC}${BLUE}         |${NC}"
     echo -e "${BLUE} |__________________________________________________|${NC}"
     
     RAM=$(free -h | awk '/Mem:/ {print $3 "/" $2}')
     UPTIME=$(uptime -p | sed 's/up //')
-    echo -e "${CYAN}  IP: $IP_VPS  |  RAM: $RAM  |  UPTIME: $UPTIME${NC}"
+    echo -e "${CYAN}  HOST: $DOMAIN  |  IP: $IP_VPS${NC}"
+    echo -e "${CYAN}  RAM: $RAM  |  UPTIME: $UPTIME${NC}"
     echo ""
 }
 
 function first_setup() {
-    if [[ ! -f "/usr/bin/udp-custom" ]]; then
+    if [[ ! -f "$BINARY_PATH" ]]; then
         show_header
-        echo -e "${YELLOW}Sedang Menginstal Mesin UDP Custom agar bisa Konek...${NC}"
+        echo -e "${YELLOW}Mengonfigurasi Mesin Zivpn untuk Pertama Kali...${NC}"
         
-        # 1. Download Binary
-        wget -q -O /usr/bin/udp-custom "${BINARY_URL}"
-        chmod +x /usr/bin/udp-custom
+        # 1. Download Binary (AMD64)
+        wget -q -O "$BINARY_PATH" "${BINARY_URL}"
+        chmod +x "$BINARY_PATH"
 
-        # 2. Create Banner HTML
+        # 2. Banner HTML (Khusus untuk Log Zivpn App)
         cat <<EOF > $BANNER_PATH
+<br><font color="magenta"><b>=================================</b></font><br>
+<font color="cyan"><b>      OGH PREMIUM ZIVPN APP      </b></font><br>
+<font color="white"><b>      STATUS: AKTIF & TERHUBUNG   </b></font><br>
 <font color="magenta"><b>=================================</b></font><br>
-<font color="cyan"><b>     OGH PREMIUM UDP CUSTOM      </b></font><br>
-<font color="white"><b>      Koneksi Berhasil Terhubung  </b></font><br>
-<font color="magenta"><b>=================================</b></font>
 EOF
 
-        # 3. Setting Port & Service (PENTING: Port 3671)
-        cat <<EOF > /etc/systemd/system/udp-custom.service
+        # 3. Create Service Systemd (Parameter Khusus agar Zivpn Konek)
+        cat <<EOF > /etc/systemd/system/zivpn.service
 [Unit]
-Description=UDP Custom OGH
+Description=Zivpn UDP Engine
 After=network.target
 
 [Service]
 User=root
 Type=simple
-ExecStart=/usr/bin/udp-custom server -exclude 1,22 -auth -banner $BANNER_PATH
+# -auth: Penting agar mengecek user SSH
+# -exclude: Menghindari port sistem agar tidak error
+ExecStart=$BINARY_PATH server -exclude 1,22,80,443 -auth -banner $BANNER_PATH
 Restart=always
-RestartSec=3
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-        # 4. Membuka Port Firewall (UDP & TCP)
+        # 4. Aktifkan Service & Buka Port
         systemctl daemon-reload
-        systemctl enable udp-custom
-        systemctl start udp-custom
+        systemctl enable zivpn
+        systemctl restart zivpn
         
+        # Membersihkan firewall dan membuka port UDP secara total
         iptables -F
+        iptables -t nat -F
         iptables -A INPUT -p udp --dport 100:65535 -j ACCEPT
         iptables -A INPUT -p tcp --dport 100:65535 -j ACCEPT
         
-        echo -e "${GREEN}Instalasi Selesai! Mesin sudah berjalan.${NC}"
+        echo -e "${GREEN}Sukses! VPS Siap Digunakan untuk Aplikasi Zivpn.${NC}"
         sleep 2
     fi
 }
@@ -95,47 +109,35 @@ function create_account() {
     echo -e "│  ${GREEN}>>> BUAT AKUN ZIVPN BARU <<<${NC}             │"
     echo -e "${BLUE}└───────────────────────────────────────────┘${NC}"
     read -p "  Username : " user
+    [[ -z "$user" ]] && return
     id "$user" &>/dev/null && { echo -e "${RED}User sudah ada!${NC}"; sleep 2; return; }
     read -p "  Password : " pass
     read -p "  Expired (Hari): " exp
     
     exp_date=$(date -d "$exp days" +"%Y-%m-%d")
-    # Membuat user SSH System (Basis Zivpn)
+    # Zivpn membaca user sistem. /bin/false agar tidak bisa login terminal
     useradd -e "$exp_date" -s /bin/false -M "$user"
     echo "$user:$pass" | chpasswd
     
     show_header
-    echo -e "${GREEN}✅ DETAIL AKUN ZIVPN (AKTIF)${NC}"
+    echo -e "${GREEN}✅ DATA AKUN APLIKASI ZIVPN${NC}"
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "  Host/IP  : $IP_VPS"
-    echo -e "  Port     : 3671"
-    echo -e "  User     : $user"
-    echo -e "  Pass     : $pass"
-    echo -e "  Expired  : $exp_date"
+    echo -e "  📌 Host/Domain : $DOMAIN"
+    echo -e "  📌 IP VPS      : $IP_VPS"
+    echo -e "  📌 Port        : 3671"
+    echo -e "  📌 User        : $user"
+    echo -e "  📌 Pass        : $pass"
+    echo -e "  📌 Expired     : $exp_date"
     echo -e "${BLUE}=====================================${NC}"
-    echo -e "${YELLOW}Gunakan Payload UDP Custom di aplikasi Zivpn${NC}"
+    echo -e "${YELLOW}Gunakan Mode 'UDP Custom' di Zivpn App${NC}"
     echo ""
     read -n 1 -s -r -p "Tekan [Enter] untuk kembali..."
 }
 
-function list_accounts() {
-    show_header
-    echo -e "${BLUE}┌──────────────────────────────────────────────────┐${NC}"
-    printf "│ %-18s %-18s %-10s │\n" "USERNAME" "EXP DATE" "STATUS"
-    echo -e "├──────────────────────────────────────────────────┤${NC}"
-    while IFS=: read -r u _ _ uid _ _ _; do
-        if [ $uid -ge 1000 ]; then
-            expire=$(chage -l "$u" | grep "Account expires" | cut -d: -f2)
-            printf "│ %-18s %-18s %-10s │\n" "$u" "$expire" "${GREEN}Active${NC}"
-        fi
-    done < /etc/passwd | grep -v "nobody"
-    echo -e "${BLUE}└──────────────────────────────────────────────────┘${NC}"
-}
-
-# Inisialisasi
+# Jalankan Setup
 first_setup
 
-# Loop Menu
+# Loop Menu Utama
 while true; do
     show_header
     echo -e "  ${BLUE}┌──────────────────────┐  ┌──────────────────────┐${NC}"
@@ -144,20 +146,30 @@ while true; do
     echo -e "  ${BLUE}│${NC} [02] List Akun       ${BLUE}│  │${NC} [04] Ganti Password  ${BLUE}│${NC}"
     echo -e "  ${BLUE}└──────────────────────┘  └──────────────────────┘${NC}"
     echo -e "                ${BLUE}┌──────────────────────┐${NC}"
-    echo -e "                ${BLUE}│${NC}    [05] Info Domain  ${BLUE}│${NC}"
-    echo -e "                ${BLUE}├──────────────────────┤${NC}"
-    echo -e "                ${BLUE}│${NC}    [00] Exit Program ${BLUE}│${NC}"
+    echo -e "                ${BLUE}│${NC}    [00] Keluar       ${BLUE}│${NC}"
     echo -e "                ${BLUE}└──────────────────────┘${NC}"
     echo ""
-    echo -ne "  ${BOLD}${CYAN}Pilih Opsi: ${NC}"
+    echo -ne "  ${BOLD}${CYAN}Pilih Menu: ${NC}"
     read opt
     case $opt in
         1|01) create_account ;;
-        2|02) list_accounts; echo ""; read -n 1 -s -r -p "Tekan Enter..." ;;
-        3|03) list_accounts; echo -ne "${RED}User: ${NC}"; read u; userdel -f $u; sleep 1 ;;
-        4|04) show_header; read -p "User: " u; read -p "Pass Baru: " p; echo "$u:$p" | chpasswd; sleep 1 ;;
-        5|05) show_header; echo -e "IP VPS: $IP_VPS"; read -n 1 ;;
+        2|02) 
+            show_header
+            echo -e "${BLUE}┌───────────────────────────────────────────┐${NC}"
+            printf "│ %-15s %-15s │\n" "USER" "EXP"
+            echo -e "├───────────────────────────────────────────┤${NC}"
+            while IFS=: read -r u _ _ uid _ _ _; do
+                [[ $uid -ge 1000 ]] && printf "│ %-15s %-15s │\n" "$u" "$(chage -l $u | grep 'expires' | cut -d: -f2)"
+            done < /etc/passwd | grep -v "nobody"
+            echo -e "${BLUE}└───────────────────────────────────────────┘${NC}"
+            read -n 1 -p "Enter..." ;;
+        3|03) 
+            show_header
+            read -p "User yang dihapus: " u
+            if id "$u" &>/dev/null; then userdel -f $u && echo "Sukses"; else echo "User tidak ada"; fi
+            sleep 1 ;;
+        4|04) show_header; read -p "User: " u; read -p "Pass Baru: " p; echo "$u:$p" | chpasswd; echo "Berhasil!"; sleep 1 ;;
         0|00) exit 0 ;;
-        *) echo -e "${RED}Input Salah!${NC}"; sleep 1 ;;
+        *) sleep 1 ;;
     esac
 done
