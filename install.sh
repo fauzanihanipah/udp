@@ -1,103 +1,112 @@
+#!/bin/bash
+
+# --- KONFIGURASI ---
+TOKEN="8509037286:AAEMao-IFVx0V1VK2xbDEILMNO7plLuK5hE"
+ADMIN_ID="1358908223"
+# -------------------
+
+echo "Mulai membersihkan dan menginstal ulang Bot ZiVPN..."
+
+# 1. Matikan dan Hapus Service Lama
+systemctl stop zibot 2>/dev/null
+systemctl disable zibot 2>/dev/null
+pkill -f bot.py
+
+# 2. Hapus file lama agar tidak bentrok
+rm -rf /root/bot.py
+rm -rf /etc/systemd/system/zibot.service
+
+# 3. Install/Update Dependency
+apt update && apt install python3-pip wget -y
+pip3 install python-telegram-bot --upgrade --break-system-packages
+
+# 4. Buat File bot.py Baru (Versi Sempurna)
+cat <<EOF > /root/bot.py
 import os
 import subprocess
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 
-# --- KONFIGURASI ---
-TOKEN = "8509037286:AAEMao-IFVx0V1VK2xbDEILMNO7plLuK5hE"
-ADMIN_ID = 1358908223  # Ganti dengan ID Telegram kamu
-# -------------------
+TOKEN = "$TOKEN"
+ADMIN_ID = $ADMIN_ID
+GET_USER_PASS = 1
 
-# State untuk percakapan
-CHOOSING, GET_USER_PASS = range(2)
-
-# Menu Utama
 def main_menu():
-    return ReplyKeyboardMarkup([
-        ['➕ Buat Akun', '🗑️ Hapus Akun'],
-        ['📊 Status VPS', '🔄 Restart ZiVPN']
-    ], resize_keyboard=True)
+    return ReplyKeyboardMarkup([['➕ Buat Akun', '🗑️ Hapus Akun'], ['📊 Status VPS', '🔄 Restart ZiVPN']], resize_keyboard=True)
 
-# Menu Pilihan Durasi
 def duration_menu():
-    return ReplyKeyboardMarkup([
-        ['1 Hari (Trial)', '7 Hari'],
-        ['30 Hari', '🔙 Batal']
-    ], resize_keyboard=True)
+    return ReplyKeyboardMarkup([['1 Hari (Trial)', '7 Hari'], ['30 Hari', '🔙 Batal']], resize_keyboard=True)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     if update.effective_user.id != ADMIN_ID: return
-    await update.message.reply_text("Pilih Menu Admin ZiVPN:", reply_markup=main_menu())
+    await update.message.reply_text("🛠️ **Panel Admin ZiVPN**", reply_markup=main_menu(), parse_mode='Markdown')
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_menu(update, context):
     if update.effective_user.id != ADMIN_ID: return
     text = update.message.text
-
     if text == '➕ Buat Akun':
-        await update.message.reply_text("Pilih Durasi Akun:", reply_markup=duration_menu())
-    
+        await update.message.reply_text("Pilih Durasi:", reply_markup=duration_menu())
     elif text in ['1 Hari (Trial)', '7 Hari', '30 Hari']:
-        # Simpan durasi pilihan ke context
         context.user_data['days'] = text.split()[0]
-        await update.message.reply_text(f"Pilihan: {text}\nFormat: `user pass` (pisahkan spasi)", parse_mode='Markdown', reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Masukkan \`user pass\` (contoh: \`agus 123\`)", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
         return GET_USER_PASS
-
-    elif text == '🗑️ Hapus Akun':
-        await update.message.reply_text("Ketik: `/hapus username`")
-
     elif text == '📊 Status VPS':
-        ram = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.2f%%\", $3*100/$2 }'")
-        msg = f"📊 **STATUS VPS**\nRAM Usage: {ram}\nIP: {subprocess.getoutput('wget -qO- ipv4.icanhazip.com')}"
-        await update.message.reply_text(msg, parse_mode='Markdown')
-
+        uptime = subprocess.getoutput("uptime -p")
+        ip = subprocess.getoutput("wget -qO- ipv4.icanhazip.com")
+        await update.message.reply_text(f"📊 **INFO**\nIP: \`{ip}\`\nUp: {uptime}", parse_mode='Markdown')
     elif text == '🔄 Restart ZiVPN':
         os.system("systemctl restart zivpn")
-        await update.message.reply_text("✅ Service ZiVPN Berhasil di Restart!")
-
-    elif text == '🔙 Batal':
-        await update.message.reply_text("Dibatalkan.", reply_markup=main_menu())
-
-async def process_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    try:
-        data = update.message.text.split()
-        user, pw = data[0], data[1]
-        days = context.user_data.get('days', '1')
-        
-        # Eksekusi sistem
-        os.system(f"useradd -e $(date -d '{days} days' +%Y-%m-%d) -s /bin/false {user}")
-        os.system(f"echo '{user}:{pw}' | chpasswd")
-        
-        ip = subprocess.getoutput("wget -qO- ipv4.icanhazip.com")
-        res = (f"✅ **AKUN BERHASIL**\n"
-               f"User: `{user}`\nPass: `{pw}`\nExp: {days} Hari\n"
-               f"Config: `{ip}:36712@{user}:{pw}`")
-        
-        await update.message.reply_text(res, parse_mode='Markdown', reply_markup=main_menu())
-    except:
-        await update.message.reply_text("❌ Gagal! Pastikan format benar: `user pass`", reply_markup=main_menu())
+        await update.message.reply_text("✅ Restart Berhasil!")
     return ConversationHandler.END
 
-async def hapus_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    if not context.args: return
-    user = context.args[0]
-    os.system(f"userdel -f {user}")
-    await update.message.reply_text(f"✅ User `{user}` telah dihapus.", parse_mode='Markdown')
+async def process_create(update, context):
+    try:
+        u, p = update.message.text.split()
+        d = context.user_data.get('days', '1')
+        os.system(f"useradd -e \$(date -d '\$d days' +%Y-%m-%d) -s /bin/false \$u")
+        os.system(f"echo '\$u:\$p' | chpasswd")
+        ip = subprocess.getoutput("wget -qO- ipv4.icanhazip.com")
+        await update.message.reply_text(f"✅ **SUKSES**\nUser: \`\$u\`\nPass: \`\$p\`\nExp: \$d Hari\nConfig: \`\$ip:36712@\$u:\$p\`", reply_markup=main_menu(), parse_mode='Markdown')
+    except:
+        await update.message.reply_text("❌ Gagal! Format: \`user pass\`", reply_markup=main_menu(), parse_mode='Markdown')
+    return ConversationHandler.END
+
+async def hapus(update, context):
+    if update.effective_user.id == ADMIN_ID and context.args:
+        os.system(f"userdel -f {context.args[0]}")
+        await update.message.reply_text(f"🗑️ User \`{context.args[0]}\` dihapus.", parse_mode='Markdown')
 
 if __name__ == '__main__':
-    from telegram.ext import ConversationHandler
     app = ApplicationBuilder().token(TOKEN).build()
-    
-    conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex('^(1 Hari \(Trial\)|7 Hari|30 Hari)$'), handle_message)],
+    conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^(1 Hari \(Trial\)|7 Hari|30 Hari)$'), handle_menu)],
         states={GET_USER_PASS: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_create)]},
-        fallbacks=[],
+        fallbacks=[MessageHandler(filters.Regex('^🔙 Batal$'), start)],
     )
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("hapus", hapus_akun))
-    app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+    app.add_handler(CommandHandler("hapus", hapus))
+    app.add_handler(conv)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
     app.run_polling()
+EOF
+
+# 5. Pasang Service Otomatis
+cat <<EOF > /etc/systemd/system/zibot.service
+[Unit]
+Description=ZiVPN Bot
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /root/bot.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 6. Aktivasi
+systemctl daemon-reload
+systemctl enable zibot
+systemctl start zibot
+
+echo "----------------------------------------------"
+echo "  BERSIH DAN TERINSTAL! Bot sudah aktif.     "
+echo "----------------------------------------------"
